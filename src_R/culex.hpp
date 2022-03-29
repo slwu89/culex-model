@@ -333,10 +333,13 @@ inline void culex<int>::update(const Rcpp::List& parameters) {
   });
   
   i = 0;
-  this->L.for_each([&death_larvae_tot, &i, dt = this->dt](arma::Mat<int>::elem_type& val) {
-    if (val > 0) {
-      val = R::rbinom(val, R::pexp(death_larvae_tot[i] * dt, 1.0, 0, 0));  
-    }
+  this->L.each_col([&death_larvae_tot, &i, dt = this->dt](arma::Col<int>& val) {
+    double surv = R::pexp(death_larvae_tot[i] * dt, 1.0, 0, 0);
+    val.for_each([surv](arma::Col<int>::elem_type& val) {
+      if (val > 0) {
+        val = R::rbinom(val, surv);
+      }
+    });
     i++;
   });
   
