@@ -378,5 +378,89 @@ inline void culex<int>::update(const Rcpp::List& parameters) {
 };
 
 // deterministic update
+template <>
+inline void culex<double>::update(const Rcpp::List& parameters) {
+  
+  double tnow = this->step * this->dt;
+  int tau_E = this->tau_E[this->step];
+  int tau_L = this->tau_L[this->step];
+  int tau_P = this->tau_P[this->step];
+  
+  double p0 = parameters["p0"];
+  double p1 = parameters["p1"];
+  
+  // temperature
+  double temp = temperature(tnow, parameters);
+  
+  // photoperiod
+  double pp = photoperiod(tnow, parameters);
+  double pp_1 = photoperiod(tnow - 1.0, parameters);
+  
+  // gonotrophic cycle
+  double gon = gonotrophic(temp, parameters);
+  
+  // mortality
+  double death_egg = death_egg_rate(temp, parameters);
+  double death_larvae = death_larvae_rate(temp, parameters);
+  double death_pupae = death_pupae_rate(temp, parameters);
+  double death_adult = death_adult_rate(temp, parameters);
+  
+  arma::Row<double> larvae_tot = arma::sum(this->L, 0);
+  std::vector<double> death_larvae_tot(this->p, death_larvae);
+  for (auto i = 0u; i < this->p; ++i) {
+    death_larvae_tot[i] += p0 * larvae_tot(i) / (p1 + larvae_tot(i));
+  }
+  
+  // diapause and egg laying
+  double dia;
+  if (pp > pp_1) {
+    dia = diapause_spring(pp);
+  } else {
+    dia = diapause_autumn(pp);
+  }
+  
+  // egg laying
+  arma::Row<double> lambda = oviposition(dia, gon, parameters) * this->A * this->dt;
+  
+  // survival
+  double surv = R::pexp(death_egg * dt, 1.0, 0, 0);
+  this->E *= surv;
+  
+  int i{0};
+  this->L.each_col([&death_larvae_tot, &i, dt = this->dt](arma::Col<double>& val) {
+    double surv = R::pexp(death_larvae_tot[i] * dt, 1.0, 0, 0);
+    val *= surv;
+    i++;
+  });
+  
+  surv = R::pexp(death_pupae * dt, 1.0, 0, 0);
+  this->P *= surv;
+  
+  
+  surv = R::pexp(death_adult * dt, 1.0, 0, 0);
+  this->A *= surv;
+  
+  // advancement
+  arma::Row<double> E2L = this->E.row(0);
+  this->E.row(0).zeros();
+  this->E = this->shiftE * this->E;
+  this->E.row(tau_E-1) = lambda;
+  
+  arma::Row<double> L2P = this->L.row(0);
+  this->L.row(0).zeros();
+  this->L = this->shiftL * this->L;
+  this->L.row(tau_L-1) = E2L;
+  
+  arma::Row<double> P2A = this->P.row(0);
+  this->P.row(0).zeros();
+  this->P = this->shiftP * this->P;
+  this->P.row(tau_P-1) = L2P;;
+  
+  this->A += P2A;
+  
+  this->step += 1;
+  
+};
+
 
 #endif
