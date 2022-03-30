@@ -196,6 +196,7 @@ inline double oviposition(const double d, const double G, const Rcpp::List& pars
 // L: larvae (steps X patches)
 // P: pupae (steps X patches)
 // A: adults (patches)
+// psi: a movement matrix; rows should sum to 1 (patches X patches)
 // shiftE: sparse matrix when multiplies E on the left to advance by 1 step
 // shiftL: sparse matrix when multiplies L on the left to advance by 1 step
 // shiftP: sparse matrix when multiplies P on the left to advance by 1 step
