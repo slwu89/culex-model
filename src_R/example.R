@@ -78,7 +78,14 @@ tmax <- 365*5
 maxstep <- tmax/dt
 
 # initial # of adults
-A0 <- 12000
+A0 <- c(600, 0)
+
+# movement between 2 patches
+psi <- matrix(
+  data = c(0.95, 0.05,
+           0.025, 0.975),
+  nrow = 2, ncol = 2, byrow = TRUE
+)
 
 # integrate ODEs describing maturation delays
 
@@ -111,65 +118,60 @@ tauL <- as.integer(tau_traj[step_forward_E %in% 1:maxstep, "L"][[1]])
 tauP <- as.integer(tau_traj[step_forward_E %in% 1:maxstep, "P"][[1]])
 
 # solve a determiinistic trajectory
-mod <- create_culex_deterministic(p = 1, tau_E = tauE, tau_L = tauL, tau_P = tauP, dt = dt)
+mod <- create_culex_deterministic(p = 2, tau_E = tauE, tau_L = tauL, tau_P = tauP, dt = dt, psi = psi)
 set_A_deterministic(mod = mod, A = A0)
 
-out_d <- matrix(data = NaN, nrow = tmax, ncol = 4)
+out_d <- data.table(day = rep(1:tmax, each = 8), stage = rep(c("E","L","P","A"), tmax*2), patch = rep(c(1,1,1,1,2,2,2,2), tmax), value = NaN)
+setkey(out_d, "day")
+out_d[, "patch" := as.factor(patch)]
 out_i <- 1L
 
 for (i in 1:maxstep) {
   step_culex_deterministic(mod = mod, parameters = parameters)
   if ((i-1) %% (1/dt) == 0) {
-    out_d[out_i, 1] <- get_E_deterministic(mod = mod)
-    out_d[out_i, 2] <- get_L_deterministic(mod = mod)
-    out_d[out_i, 3] <- get_P_deterministic(mod = mod)
-    out_d[out_i, 4] <- get_A_deterministic(mod = mod)
+    out_d[day == out_i & stage == "E", "value" := as.vector(get_E_deterministic(mod))]
+    out_d[day == out_i & stage == "L", "value" := as.vector(get_L_deterministic(mod))]
+    out_d[day == out_i & stage == "P", "value" := as.vector(get_P_deterministic(mod))]
+    out_d[day == out_i & stage == "A", "value" := as.vector(get_A_deterministic(mod))]
     out_i <- out_i + 1L
   }
 }
 
 # draw samples from stochastic model
 out <- parallel::mclapply(X = 1:10, FUN = function(runid) {
-  mod <- create_culex_stochastic(p = 1, tau_E = tauE, tau_L = tauL, tau_P = tauP, dt = dt)
+  mod <- create_culex_stochastic(p = 2, tau_E = tauE, tau_L = tauL, tau_P = tauP, dt = dt, psi = psi)
   set_A_stochastic(mod = mod, A = A0)
 
-  out <- matrix(data = NaN, nrow = tmax, ncol = 4)
+  out <- data.table(day = rep(1:tmax, each = 8), stage = rep(c("E","L","P","A"), tmax*2), patch = rep(c(1,1,1,1,2,2,2,2), tmax), value = NaN)
+  setkey(out, "day")
+  out[, "patch" := as.factor(patch)]
   out_i <- 1L
 
   for (i in 1:maxstep) {
     step_culex_stochastic(mod = mod, parameters = parameters)
     if ((i-1) %% (1/dt) == 0) {
-      out[out_i, 1] <- get_E_stochastic(mod = mod)
-      out[out_i, 2] <- get_L_stochastic(mod = mod)
-      out[out_i, 3] <- get_P_stochastic(mod = mod)
-      out[out_i, 4] <- get_A_stochastic(mod = mod)
+      out[day == out_i & stage == "E", "value" := as.vector(get_E_stochastic(mod))]
+      out[day == out_i & stage == "L", "value" := as.vector(get_L_stochastic(mod))]
+      out[day == out_i & stage == "P", "value" := as.vector(get_P_stochastic(mod))]
+      out[day == out_i & stage == "A", "value" := as.vector(get_A_stochastic(mod))]
       out_i <- out_i + 1L
     }
   }
 
-  out <- as.data.table(out)
-  setnames(out, c("E", "L", "P", "A"))
   out[ , "run" := as.integer(runid)]
-  out[ , "day" := 1:tmax]
   return(out)
 })
 
-out_d <- as.data.table(out_d)
-setnames(out_d, c("E", "L", "P", "A"))
-out_d[ , "day" := 1:tmax]
-out_d <- melt(out_d, id.vars = c("day"))
 
 out_sum <- do.call(rbind, out)
-out_sum <- melt(out_sum, id.vars = c("run",'day'))
-
-# plot
-ggplot(out_sum[variable == "A", ]) +
-  geom_line(aes(x=day,y=value,group=run),alpha=0.25) +
-  geom_line(data = out_d[variable == "A", ], aes(x = day, y = value), linetype = 2L) +
-  theme_bw()
 
 ggplot(data = out_sum) +
-  geom_line(aes(x=day, y =value, group = run, color = variable), alpha = 0.35) +
-  geom_line(data = out_d, aes(x=day, y =value, color = variable), linetype = 2L) +
-  facet_wrap(. ~ variable, scales = "free") +
+  geom_line(aes(x=day, y =value, group = interaction(run, patch), color = stage, linetype = patch), alpha = 0.35) +
+  geom_line(data = out_d, aes(x=day, y =value, color = stage, linetype = patch)) +
+  facet_wrap(. ~ stage, scales = "free") +
+  theme_bw()
+
+ggplot(data = out_sum[stage == "A", ]) +
+  geom_line(aes(x=day, y =value, group = interaction(run, patch), color = stage, linetype = patch), alpha = 0.35) +
+  geom_line(data = out_d[stage == "A", ], aes(x=day, y =value, color = stage, linetype = patch)) +
   theme_bw()

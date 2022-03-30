@@ -213,6 +213,8 @@ struct culex {
   arma::Mat<T> P;
   arma::Row<T> A;
   
+  arma::Mat<double> psi;
+  
   arma::SpMat<int> shiftE;
   arma::SpMat<int> shiftL;
   arma::SpMat<int> shiftP;
@@ -225,7 +227,7 @@ struct culex {
   std::vector<int> tau_L;
   std::vector<int> tau_P;
   
-  culex(const int p_, const std::vector<int>& tau_E_, const std::vector<int>& tau_L_, const std::vector<int>& tau_P_, const double dt_);
+  culex(const int p_, const std::vector<int>& tau_E_, const std::vector<int>& tau_L_, const std::vector<int>& tau_P_, const double dt_, const arma::Mat<double>& psi_);
   ~culex() = default;
   
   void update(const Rcpp::List& parameters);
@@ -234,8 +236,8 @@ struct culex {
 
 // constructor
 template <typename T>
-inline culex<T>::culex(const int p_, const std::vector<int>& tau_E_, const std::vector<int>& tau_L_, const std::vector<int>& tau_P_, const double dt_) :
-  step(0), p(p_), dt(dt_), tau_E(tau_E_), tau_L(tau_L_), tau_P(tau_P_)
+inline culex<T>::culex(const int p_, const std::vector<int>& tau_E_, const std::vector<int>& tau_L_, const std::vector<int>& tau_P_, const double dt_, const arma::Mat<double>& psi_) :
+  psi(psi_), step(0), p(p_), dt(dt_), tau_E(tau_E_), tau_L(tau_L_), tau_P(tau_P_)
 {
   int maxE = *max_element(tau_E.begin(), tau_E.end());
   int maxL = *max_element(tau_L.begin(), tau_L.end());
@@ -277,6 +279,12 @@ inline culex<T>::culex(const int p_, const std::vector<int>& tau_E_, const std::
 // stochastic update
 template <>
 inline void culex<int>::update(const Rcpp::List& parameters) {
+  
+  // for stochastic update, better to work with psi transposed
+  // due to artifact of how to retrieve pointer to memory needed in multinomial sample
+  if (this->step == 0) {
+    this->psi = this->psi.t();
+  }
   
   double tnow = this->step * this->dt;
   int tau_E = this->tau_E[this->step];
@@ -354,6 +362,15 @@ inline void culex<int>::update(const Rcpp::List& parameters) {
       val = R::rbinom(val, R::pexp(death_adult * dt, 1.0, 0, 0));  
     }
   });
+  
+  // dispersal
+  arma::Row<int> A_move(this->p, arma::fill::zeros);
+  arma::Row<int> tmp(this->p, arma::fill::zeros);
+  for (auto i = 0u; i < this->p; ++i) {
+    R::rmultinom(this->A(i), this->psi.colptr(i), this->p, tmp.memptr());
+    A_move += tmp;
+  }
+  A = A_move;
   
   // advancement
   arma::Row<int> E2L = this->E.row(0);
@@ -438,6 +455,9 @@ inline void culex<double>::update(const Rcpp::List& parameters) {
   
   surv = R::pexp(death_adult * dt, 1.0, 0, 0);
   this->A *= surv;
+  
+  // dispersal
+  this->A = this->A * this->psi;
   
   // advancement
   arma::Row<double> E2L = this->E.row(0);
