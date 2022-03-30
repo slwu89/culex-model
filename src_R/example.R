@@ -5,11 +5,12 @@ library(deSolve)
 library(parallel)
 library(data.table)
 library(ggplot2)
+library(here)
 
 rm(list=ls());gc()
 
-Rcpp::sourceCpp("src_R/culex.cpp")
-source("src_R/tau_ode.R")
+Rcpp::sourceCpp(here("src_R/culex.cpp"))
+source(here("src_R/tau_ode.R"))
 
 # parameters from https://github.com/davewi13/Temperate-Mosquito-DDE/blob/master/Chapter%202%20DDE%20code.f90
 parameters = list(
@@ -109,14 +110,32 @@ tauE <- as.integer(tau_traj[step_forward_E %in% 1:maxstep, "E"][[1]])
 tauL <- as.integer(tau_traj[step_forward_E %in% 1:maxstep, "L"][[1]])
 tauP <- as.integer(tau_traj[step_forward_E %in% 1:maxstep, "P"][[1]])
 
-# draw samples
+# solve a determiinistic trajectory
+mod <- create_culex_deterministic(p = 1, tau_E = tauE, tau_L = tauL, tau_P = tauP, dt = dt)
+set_A_deterministic(mod = mod, A = A0)
+
+out_d <- matrix(data = NaN, nrow = tmax, ncol = 4)
+out_i <- 1L
+
+for (i in 1:maxstep) {
+  step_culex_deterministic(mod = mod, parameters = parameters)
+  if ((i-1) %% (1/dt) == 0) {
+    out_d[out_i, 1] <- get_E_deterministic(mod = mod)
+    out_d[out_i, 2] <- get_L_deterministic(mod = mod)
+    out_d[out_i, 3] <- get_P_deterministic(mod = mod)
+    out_d[out_i, 4] <- get_A_deterministic(mod = mod)
+    out_i <- out_i + 1L
+  }
+}
+
+# draw samples from stochastic model
 out <- parallel::mclapply(X = 1:10, FUN = function(runid) {
   mod <- create_culex_stochastic(p = 1, tau_E = tauE, tau_L = tauL, tau_P = tauP, dt = dt)
   set_A_stochastic(mod = mod, A = A0)
-  
+
   out <- matrix(data = NaN, nrow = tmax, ncol = 4)
   out_i <- 1L
-  
+
   for (i in 1:maxstep) {
     step_culex_stochastic(mod = mod, parameters = parameters)
     if ((i-1) %% (1/dt) == 0) {
@@ -127,7 +146,7 @@ out <- parallel::mclapply(X = 1:10, FUN = function(runid) {
       out_i <- out_i + 1L
     }
   }
-  
+
   out <- as.data.table(out)
   setnames(out, c("E", "L", "P", "A"))
   out[ , "run" := as.integer(runid)]
@@ -135,15 +154,22 @@ out <- parallel::mclapply(X = 1:10, FUN = function(runid) {
   return(out)
 })
 
+out_d <- as.data.table(out_d)
+setnames(out_d, c("E", "L", "P", "A"))
+out_d[ , "day" := 1:tmax]
+out_d <- melt(out_d, id.vars = c("day"))
+
 out_sum <- do.call(rbind, out)
 out_sum <- melt(out_sum, id.vars = c("run",'day'))
 
 # plot
 ggplot(out_sum[variable == "A", ]) +
   geom_line(aes(x=day,y=value,group=run),alpha=0.25) +
+  geom_line(data = out_d[variable == "A", ], aes(x = day, y = value), linetype = 2L) +
   theme_bw()
 
 ggplot(data = out_sum) +
   geom_line(aes(x=day, y =value, group = run, color = variable), alpha = 0.35) +
+  geom_line(data = out_d, aes(x=day, y =value, color = variable), linetype = 2L) +
   facet_wrap(. ~ variable, scales = "free") +
   theme_bw()

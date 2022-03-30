@@ -247,7 +247,7 @@ inline culex<T>::culex(const int p_, const std::vector<int>& tau_E_, const std::
   P = arma::Mat<T>(maxP, p, arma::fill::zeros);
   A = arma::Row<T>(p, arma::fill::zeros);
   
-  // shift matrices (multiply on right)
+  // shift matrices (multiply on left)
   arma::umat fillE(2, maxE);
   for (auto i = 0u; i < (maxE - 1); ++i) {
     fillE(0, i) = i;
@@ -435,7 +435,6 @@ inline void culex<double>::update(const Rcpp::List& parameters) {
   
   surv = R::pexp(death_pupae * dt, 1.0, 0, 0);
   this->P *= surv;
-  
   
   surv = R::pexp(death_adult * dt, 1.0, 0, 0);
   this->A *= surv;
